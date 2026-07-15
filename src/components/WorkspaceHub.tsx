@@ -6,7 +6,11 @@ import {
   createGoogleSheet,
   createCalendarEvent,
   createGoogleTask,
-  sendGmail
+  sendGmail,
+  createGoogleMeetSpace,
+  listGoogleChatSpaces,
+  createGoogleChatSpace,
+  sendGoogleChatMessage
 } from '../lib/workspace';
 import { 
   User as FirebaseUser 
@@ -24,7 +28,9 @@ import {
   AlertTriangle,
   Sparkles,
   UserCheck,
-  Check
+  Check,
+  Video,
+  MessageSquare
 } from 'lucide-react';
 import { Candidate, Interview, Onboarding, JobApplication } from '../types';
 
@@ -67,12 +73,129 @@ export default function WorkspaceHub({
   const [emailBody, setEmailBody] = useState('');
   const [isSendingEmail, setIsSendingEmail] = useState(false);
 
+  // Google Meet states
+  const [isCreatingMeet, setIsCreatingMeet] = useState(false);
+  const [generatedMeetUrl, setGeneratedMeetUrl] = useState<string | null>(null);
+
+  // Google Chat states
+  const [chatSpaces, setChatSpaces] = useState<any[]>([]);
+  const [isLoadingSpaces, setIsLoadingSpaces] = useState(false);
+  const [selectedSpaceName, setSelectedSpaceName] = useState('');
+  const [chatMessage, setChatMessage] = useState('');
+  const [isSendingChatMessage, setIsSendingChatMessage] = useState(false);
+  const [newSpaceName, setNewSpaceName] = useState('');
+  const [isCreatingSpace, setIsCreatingSpace] = useState(false);
+
   // Listen for Google authentication state
   useEffect(() => {
     getAccessToken().then(tok => {
       setToken(tok);
     });
   }, []);
+
+  // Fetch Chat spaces when token changes
+  useEffect(() => {
+    if (token) {
+      loadSpaces();
+    } else {
+      setChatSpaces([]);
+    }
+  }, [token]);
+
+  const loadSpaces = async () => {
+    setIsLoadingSpaces(true);
+    try {
+      const spaces = await listGoogleChatSpaces();
+      setChatSpaces(spaces);
+      if (spaces.length > 0 && !selectedSpaceName) {
+        setSelectedSpaceName(spaces[0].name);
+      }
+    } catch (err) {
+      console.error('Failed to load chat spaces:', err);
+    } finally {
+      setIsLoadingSpaces(false);
+    }
+  };
+
+  const handleCreateMeet = async () => {
+    if (!token) return;
+    setIsCreatingMeet(true);
+    setStatusMsg(null);
+    try {
+      const confirmed = window.confirm('Authorize the applet to generate a secure Google Meet space?');
+      if (!confirmed) {
+        setIsCreatingMeet(false);
+        return;
+      }
+      const result = await createGoogleMeetSpace();
+      setGeneratedMeetUrl(result.meetingUri);
+      setStatusMsg({
+        type: 'success',
+        text: `Successfully generated Google Meet space: ${result.meetingUri} (Meeting Code: ${result.meetingCode})`
+      });
+    } catch (err: any) {
+      console.error(err);
+      setStatusMsg({ type: 'error', text: err.message || 'Meet Space Creation Failed.' });
+    } finally {
+      setIsCreatingMeet(false);
+    }
+  };
+
+  const handleCreateChatSpace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !newSpaceName) return;
+    setIsCreatingSpace(true);
+    setStatusMsg(null);
+    try {
+      const confirmed = window.confirm(`Authorize the applet to create a new Google Chat space named "${newSpaceName}"?`);
+      if (!confirmed) {
+        setIsCreatingSpace(false);
+        return;
+      }
+      const result = await createGoogleChatSpace(newSpaceName);
+      setStatusMsg({
+        type: 'success',
+        text: `Google Chat Space "${newSpaceName}" created successfully!`
+      });
+      setNewSpaceName('');
+      await loadSpaces();
+      if (result.name) {
+        setSelectedSpaceName(result.name);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setStatusMsg({ type: 'error', text: err.message || 'Chat Space Creation Failed.' });
+    } finally {
+      setIsCreatingSpace(false);
+    }
+  };
+
+  const handleSendChatMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !selectedSpaceName || !chatMessage) return;
+    setIsSendingChatMessage(true);
+    setStatusMsg(null);
+    try {
+      const activeSpace = chatSpaces.find(s => s.name === selectedSpaceName);
+      const spaceTitle = activeSpace?.displayName || activeSpace?.name || 'Selected Room';
+      const confirmed = window.confirm(`Authorize the applet to dispatch this announcement to Google Chat space "${spaceTitle}"?`);
+      if (!confirmed) {
+        setIsSendingChatMessage(false);
+        return;
+      }
+      await sendGoogleChatMessage(selectedSpaceName, chatMessage);
+      setStatusMsg({
+        type: 'success',
+        text: 'Successfully sent announcement to Google Chat space!'
+      });
+      setChatMessage('');
+    } catch (err: any) {
+      console.error(err);
+      setStatusMsg({ type: 'error', text: err.message || 'Failed to dispatch chat message.' });
+    } finally {
+      setIsSendingChatMessage(false);
+    }
+  };
 
   const handleLogin = async () => {
     setIsLoggingIn(true);
@@ -363,7 +486,7 @@ export default function WorkspaceHub({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 max-w-md mx-auto text-left py-2">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-3xl mx-auto text-left py-2">
             <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg flex items-start space-x-2.5">
               <Mail className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
               <div>
@@ -390,6 +513,20 @@ export default function WorkspaceHub({
               <div>
                 <h4 className="font-bold text-slate-800 text-[11px]">Google Tasks</h4>
                 <p className="text-[10px] text-slate-400">Sync employee onboarding checklist milestones straight into your Task List.</p>
+              </div>
+            </div>
+            <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg flex items-start space-x-2.5">
+              <Video className="w-4 h-4 text-rose-600 mt-0.5 shrink-0" />
+              <div>
+                <h4 className="font-bold text-slate-800 text-[11px]">Google Meet</h4>
+                <p className="text-[10px] text-slate-400">Generate secure instant video spaces for interview panel rooms.</p>
+              </div>
+            </div>
+            <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg flex items-start space-x-2.5">
+              <MessageSquare className="w-4 h-4 text-cyan-600 mt-0.5 shrink-0" />
+              <div>
+                <h4 className="font-bold text-slate-800 text-[11px]">Google Chat</h4>
+                <p className="text-[10px] text-slate-400">Broadcast onboarding, hiring progress, and channel alerts to team spaces.</p>
               </div>
             </div>
           </div>
@@ -441,31 +578,45 @@ export default function WorkspaceHub({
               </div>
 
               {/* Status channels indicators */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-4 text-xs">
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-2.5 pt-4 text-xs">
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
                   <Mail className="w-4 h-4 text-indigo-600 mx-auto" />
-                  <div className="font-bold text-[11px] text-slate-800">Gmail API</div>
+                  <div className="font-bold text-[10px] text-slate-800">Gmail API</div>
                   <div className="text-[9px] text-emerald-600 font-semibold flex items-center justify-center space-x-0.5">
                     <Check className="w-3 h-3" /> <span>Connected</span>
                   </div>
                 </div>
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
                   <Table className="w-4 h-4 text-emerald-600 mx-auto" />
-                  <div className="font-bold text-[11px] text-slate-800">Sheets API</div>
+                  <div className="font-bold text-[10px] text-slate-800">Sheets API</div>
                   <div className="text-[9px] text-emerald-600 font-semibold flex items-center justify-center space-x-0.5">
                     <Check className="w-3 h-3" /> <span>Connected</span>
                   </div>
                 </div>
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
                   <CalendarIcon className="w-4 h-4 text-blue-600 mx-auto" />
-                  <div className="font-bold text-[11px] text-slate-800">Calendar API</div>
+                  <div className="font-bold text-[10px] text-slate-800">Calendar API</div>
                   <div className="text-[9px] text-emerald-600 font-semibold flex items-center justify-center space-x-0.5">
                     <Check className="w-3 h-3" /> <span>Connected</span>
                   </div>
                 </div>
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
                   <CheckSquare className="w-4 h-4 text-amber-600 mx-auto" />
-                  <div className="font-bold text-[11px] text-slate-800">Tasks API</div>
+                  <div className="font-bold text-[10px] text-slate-800">Tasks API</div>
+                  <div className="text-[9px] text-emerald-600 font-semibold flex items-center justify-center space-x-0.5">
+                    <Check className="w-3 h-3" /> <span>Connected</span>
+                  </div>
+                </div>
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
+                  <Video className="w-4 h-4 text-rose-600 mx-auto" />
+                  <div className="font-bold text-[10px] text-slate-800">Meet API</div>
+                  <div className="text-[9px] text-emerald-600 font-semibold flex items-center justify-center space-x-0.5">
+                    <Check className="w-3 h-3" /> <span>Connected</span>
+                  </div>
+                </div>
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center space-y-1">
+                  <MessageSquare className="w-4 h-4 text-cyan-600 mx-auto" />
+                  <div className="font-bold text-[10px] text-slate-800">Chat API</div>
                   <div className="text-[9px] text-emerald-600 font-semibold flex items-center justify-center space-x-0.5">
                     <Check className="w-3 h-3" /> <span>Connected</span>
                   </div>
@@ -622,6 +773,52 @@ export default function WorkspaceHub({
               </div>
             </div>
 
+            {/* Google Meet Space Generator */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 space-y-4">
+              <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
+                <Video className="w-4 h-4 text-rose-600" />
+                <h4 className="font-bold text-slate-900 text-sm">Google Meet Video Space Generator</h4>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Instantly provision a unique, high-definition Google Meet space with a secure room code. You can attach this meeting code directly to panel schedules or mail invites.
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <button
+                  onClick={handleCreateMeet}
+                  disabled={isCreatingMeet}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-55 text-white font-bold text-xs rounded-lg transition flex items-center justify-center space-x-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {isCreatingMeet ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Provisioning Space...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Video className="w-3.5 h-3.5" />
+                      <span>Generate Instant Meet Space</span>
+                    </>
+                  )}
+                </button>
+
+                {generatedMeetUrl && (
+                  <div className="flex-1 flex items-center justify-between bg-rose-50 border border-rose-100 rounded-lg px-3 py-2 text-xs">
+                    <span className="font-mono text-rose-900 truncate mr-2 select-all">{generatedMeetUrl}</span>
+                    <a
+                      href={generatedMeetUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-rose-700 hover:text-rose-800 font-bold inline-flex items-center shrink-0 text-[11px]"
+                    >
+                      <span>Join Space</span>
+                      <ExternalLink className="w-3 h-3 ml-0.5" />
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+
           </div>
 
           {/* Sidebar: Gmail Quick Dispatcher */}
@@ -711,6 +908,99 @@ export default function WorkspaceHub({
                 </button>
               </form>
             </div>
+
+            {/* Google Chat Room Controller */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 space-y-4">
+              <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
+                <MessageSquare className="w-4 h-4 text-cyan-600" />
+                <h4 className="font-bold text-slate-900 text-sm">Google Chat Rooms Broadcast</h4>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Announce interview outcomes, offer approvals, or onboarding milestones directly into team chat spaces.
+              </p>
+
+              {/* Create new chat space room */}
+              <form onSubmit={handleCreateChatSpace} className="space-y-2 pt-1 border-t border-slate-100">
+                <label className="text-[10px] font-bold text-slate-500 uppercase block">Create New Chat Room</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={newSpaceName}
+                    onChange={(e) => setNewSpaceName(e.target.value)}
+                    placeholder="e.g. salesforce-onboarding"
+                    className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-500/10 focus:border-cyan-400"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isCreatingSpace || !newSpaceName}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-950 disabled:opacity-55 text-white font-bold text-[11px] rounded-lg cursor-pointer transition whitespace-nowrap"
+                  >
+                    {isCreatingSpace ? 'Creating...' : 'Create Room'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Broadcast message form */}
+              <form onSubmit={handleSendChatMessage} className="space-y-3 pt-2 border-t border-slate-100">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block">Select Target Chat Space Room *</label>
+                  {isLoadingSpaces ? (
+                    <div className="text-xs text-slate-400 flex items-center space-x-1 py-1.5">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-500" />
+                      <span>Loading active chat rooms...</span>
+                    </div>
+                  ) : chatSpaces.length === 0 ? (
+                    <div className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-2 font-medium">
+                      No team rooms found. Create one above to begin broadcasting.
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedSpaceName}
+                      onChange={(e) => setSelectedSpaceName(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-500/10 focus:border-cyan-400"
+                    >
+                      {chatSpaces.map(space => (
+                        <option key={space.name} value={space.name}>
+                          {space.displayName || space.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block">Message Text *</label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={chatMessage}
+                    onChange={(e) => setChatMessage(e.target.value)}
+                    placeholder="e.g. 📢 Hired! Marcus Chen has accepted his Solutions Architect offer. Starting Sept 1st!"
+                    className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-500/10 focus:border-cyan-400"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSendingChatMessage || !selectedSpaceName || !chatMessage}
+                  className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-55 text-white font-bold text-xs rounded-lg transition flex items-center justify-center space-x-1.5 cursor-pointer"
+                >
+                  {isSendingChatMessage ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Broadcasting Message...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Broadcast Chat Announcement</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+
           </div>
         </div>
       )}

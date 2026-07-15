@@ -11,6 +11,9 @@ provider.addScope('https://mail.google.com/');
 provider.addScope('https://www.googleapis.com/auth/spreadsheets');
 provider.addScope('https://www.googleapis.com/auth/calendar');
 provider.addScope('https://www.googleapis.com/auth/tasks');
+provider.addScope('https://www.googleapis.com/auth/meetings.space.created');
+provider.addScope('https://www.googleapis.com/auth/chat.spaces');
+provider.addScope('https://www.googleapis.com/auth/chat.messages.create');
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
@@ -227,6 +230,109 @@ export const createGoogleTask = async (title: string, dueDateIso?: string): Prom
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
     throw new Error(errData?.error?.message || 'Failed to create Google Task.');
+  }
+
+  return response.json();
+};
+
+// -----------------------------------------------------------------
+// GOOGLE MEET INTEGRATION
+// -----------------------------------------------------------------
+export interface MeetSpaceCreationResult {
+  name: string;
+  meetingUri: string;
+  meetingCode: string;
+}
+
+export const createGoogleMeetSpace = async (): Promise<MeetSpaceCreationResult> => {
+  const token = await getAccessToken();
+  if (!token) throw new Error('Not authenticated with Google. Please sign in.');
+
+  const response = await fetch('https://meet.googleapis.com/v2/spaces', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({})
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData?.error?.message || 'Failed to create Google Meet space.');
+  }
+
+  return response.json();
+};
+
+// -----------------------------------------------------------------
+// GOOGLE CHAT INTEGRATION
+// -----------------------------------------------------------------
+export interface ChatSpace {
+  name: string;
+  displayName?: string;
+  spaceType?: string;
+}
+
+export const listGoogleChatSpaces = async (): Promise<ChatSpace[]> => {
+  const token = await getAccessToken();
+  if (!token) throw new Error('Not authenticated with Google. Please sign in.');
+
+  const response = await fetch('https://chat.googleapis.com/v1/spaces', {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData?.error?.message || 'Failed to list Google Chat spaces.');
+  }
+
+  const data = await response.json();
+  return data.spaces || [];
+};
+
+export const createGoogleChatSpace = async (displayName: string): Promise<ChatSpace> => {
+  const token = await getAccessToken();
+  if (!token) throw new Error('Not authenticated with Google. Please sign in.');
+
+  const response = await fetch('https://chat.googleapis.com/v1/spaces', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      spaceType: 'SPACE',
+      displayName
+    })
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData?.error?.message || 'Failed to create Google Chat space.');
+  }
+
+  return response.json();
+};
+
+export const sendGoogleChatMessage = async (spaceName: string, text: string): Promise<any> => {
+  const token = await getAccessToken();
+  if (!token) throw new Error('Not authenticated with Google. Please sign in.');
+
+  const response = await fetch(`https://chat.googleapis.com/v1/${spaceName}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ text })
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData?.error?.message || 'Failed to send message to Google Chat space.');
   }
 
   return response.json();
